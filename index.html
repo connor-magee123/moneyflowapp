@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mock Money Flow App</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://unpkg.com/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    #input-form {
+      margin-bottom: 30px;
+    }
+    label, input, select, textarea {
+      margin-right: 10px;
+    }
+    #main-content {
+      display: flex;
+    }
+    #chart-container {
+      display: flex;
+      flex-direction: column;
+    }
+    svg {
+      border: 1px solid #ccc;
+      background-color: #fafafa;
+    }
+    text.node-label {
+      font-size: 11px;
+      fill: white;
+      pointer-events: none;
+      user-select: none;
+      font-weight: bold;
+      line-height: 1.2;
+    }
+    #transaction-log {
+      margin-left: 30px;
+      max-height: 400px;
+      overflow-y: auto;
+      border: 1px solid #ccc;
+      padding: 10px;
+      width: 250px;
+      background-color: #f0f0f0;
+    }
+    #expense-pie {
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Mock Money Flow App</h1>
+
+  <form id="input-form">
+    <label>Amount:</label>
+    <input type="number" id="amount" required min="0.01" step="0.01" autocomplete="off" />
+
+    <label>Type:</label>
+    <select id="type">
+      <option value="Income">Income</option>
+      <option value="Housing">Housing</option>
+      <option value="Food">Food</option>
+      <option value="Utilities">Utilities</option>
+      <option value="Savings">Savings</option>
+      <option value="Entertainment">Entertainment</option>
+    </select>
+
+    <label>Description:</label>
+    <textarea id="description" rows="1" cols="20" placeholder="Optional..."></textarea>
+
+    <button type="submit">Add</button>
+  </form>
+
+  <div id="main-content">
+    <div id="chart-container">
+      <svg id="chart" width="800" height="400"></svg>
+      <svg id="expense-pie" width="800" height="300"></svg>
+    </div>
+    <div id="transaction-log">
+      <strong>Transaction Log:</strong>
+      <ul id="log-list"></ul>
+    </div>
+  </div>
+
+  <script>
+    const data = {
+      nodes: [
+        { name: "Income" },
+        { name: "Bank Account" },
+        { name: "Housing" },
+        { name: "Food" },
+        { name: "Utilities" },
+        { name: "Savings" },
+        { name: "Entertainment" },
+      ],
+      links: []
+    };
+
+    const nodeIndex = {
+      "Income": 0,
+      "Bank Account": 1,
+      "Housing": 2,
+      "Food": 3,
+      "Utilities": 4,
+      "Savings": 5,
+      "Entertainment": 6,
+    };
+
+    const categoryColors = {
+      "Income": "#1f77b4",
+      "Bank Account": "#7f7f7f",
+      "Housing": "#ff7f0e",
+      "Food": "#2ca02c",
+      "Utilities": "#d62728",
+      "Savings": "#9467bd",
+      "Entertainment": "#8c564b"
+    };
+
+    function updateChart() {
+      const svg = d3.select("#chart");
+      svg.selectAll("*").remove();
+
+      const sankey = d3.sankey()
+        .nodeWidth(100)
+        .nodePadding(20)
+        .extent([[1, 1], [780, 380]]);
+
+      const graph = sankey({
+        nodes: data.nodes.map(d => Object.assign({}, d)),
+        links: data.links.map(d => Object.assign({}, d))
+      });
+
+      graph.nodes.forEach(node => {
+        const incoming = graph.links.filter(l => l.target === node).reduce((sum, l) => sum + l.value, 0);
+        const outgoing = graph.links.filter(l => l.source === node).reduce((sum, l) => sum + l.value, 0);
+        node.totalValue = Math.max(incoming, outgoing);
+      });
+
+      const visibleNodes = graph.nodes.filter(node => 
+        node.totalValue > 0 || node.name === "Income" || node.name === "Bank Account"
+      );
+
+      const visibleNodeSet = new Set(visibleNodes);
+      const visibleLinks = graph.links.filter(link => 
+        visibleNodeSet.has(link.source) && visibleNodeSet.has(link.target) && link.value > 0
+      );
+
+      const MIN_NODE_HEIGHT = 30;
+      visibleNodes.forEach(node => {
+        const nodeHeight = node.y1 - node.y0;
+        if (nodeHeight < MIN_NODE_HEIGHT) {
+          node.y1 = node.y0 + MIN_NODE_HEIGHT;
+        }
+      });
+
+      svg.append("g")
+        .selectAll("rect")
+        .data(visibleNodes)
+        .join("rect")
+        .attr("x", d => d.x0)
+        .attr("y", d => d.y0)
+        .attr("height", d => d.y1 - d.y0)
+        .attr("width", d => d.x1 - d.x0)
+        .attr("fill", d => categoryColors[d.name] || "#ccc");
+
+      svg.append("g")
+        .selectAll("text")
+        .data(visibleNodes)
+        .join("text")
+        .attr("class", "node-label")
+        .attr("x", d => (d.x0 + d.x1) / 2)
+        .attr("y", d => (d.y0 + d.y1) / 2)
+        .attr("text-anchor", "middle")
+        .each(function(d) {
+          const el = d3.select(this);
+          el.append("tspan")
+            .attr("x", (d.x0 + d.x1) / 2)
+            .attr("dy", "-0.4em")
+            .text(d.name);
+
+          el.append("tspan")
+            .attr("x", (d.x0 + d.x1) / 2)
+            .attr("dy", "1.2em")
+            .text(`$${d.totalValue.toFixed(2)}`);
+        });
+
+      svg.append("g")
+        .attr("fill", "none")
+        .selectAll("path")
+        .data(visibleLinks)
+        .join("path")
+        .attr("d", d3.sankeyLinkHorizontal())
+        .attr("stroke", "#aaa")
+        .attr("stroke-width", d => Math.max(5, d.width))
+        .append("title")
+        .text(d => `${d.source.name} → ${d.target.name}: $${d.value.toFixed(2)}`);
+
+      drawPieChart();
+    }
+
+    function drawPieChart() {
+      const svg = d3.select("#expense-pie");
+      svg.selectAll("*").remove();
+
+      const expenses = {};
+      data.links.forEach(link => {
+        if (link.source === nodeIndex["Bank Account"]) {
+          const cat = data.nodes[link.target].name;
+          expenses[cat] = (expenses[cat] || 0) + link.value;
+        }
+      });
+
+      const pie = d3.pie().value(d => d[1]);
+      const arc = d3.arc().innerRadius(0).outerRadius(100);
+      const pieData = pie(Object.entries(expenses));
+
+      const g = svg.append("g").attr("transform", "translate(400,150)");
+      g.selectAll("path")
+        .data(pieData)
+        .join("path")
+        .attr("d", arc)
+        .attr("fill", d => categoryColors[d.data[0]]);
+
+      g.selectAll("text")
+        .data(pieData)
+        .join("text")
+        .attr("transform", d => `translate(${arc.centroid(d)})`)
+        .attr("text-anchor", "middle")
+        .attr("font-size", 10)
+        .text(d => d.data[0]);
+    }
+
+    const form = document.getElementById("input-form");
+    const amountInput = document.getElementById("amount");
+    const logList = document.getElementById("log-list");
+
+    form.addEventListener("submit", function(event) {
+      event.preventDefault();
+      const amount = parseFloat(amountInput.value);
+      const category = document.getElementById("type").value;
+      const description = document.getElementById("description").value.trim();
+
+      if (amount <= 0 || isNaN(amount)) {
+        alert("Please enter a positive amount.");
+        return;
+      }
+
+      if (category === "Income") {
+        data.links.push({ source: nodeIndex["Income"], target: nodeIndex["Bank Account"], value: amount });
+      } else {
+        data.links.push({ source: nodeIndex["Bank Account"], target: nodeIndex[category], value: amount });
+      }
+
+      const item = document.createElement("li");
+      item.textContent = `${category}: $${amount.toFixed(2)}${description ? ' - ' + description : ''}`;
+      logList.appendChild(item);
+
+      updateChart();
+      this.reset();
+      amountInput.focus();
+    });
+
+    amountInput.addEventListener("keydown", function(event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
+    updateChart();
+  </script>
+</body>
+</html>
